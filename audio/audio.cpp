@@ -1,7 +1,7 @@
 ﻿#include <iostream>
 #include <chrono>
 #include <thread>
-
+#include <SDL.h>
 #include "audio.h"
 
 #define MINIMP3_IMPLEMENTATION
@@ -31,6 +31,8 @@ typedef struct
     size_t allocated;
 } frames_iterate_data;
 
+SDL_AudioDeviceID deviceId;
+
 static int frames_iterate_cb(void* user_data, const uint8_t* frame, int frame_size, int free_format_bytes, size_t buf_size, uint64_t offset, mp3dec_frame_info_t* info)
 {
     (void)buf_size;
@@ -55,6 +57,8 @@ static int frames_iterate_cb(void* user_data, const uint8_t* frame, int frame_si
     int samples = mp3dec_decode_frame(d->mp3d, frame, frame_size, d->info->buffer + d->info->samples, info);
     if (samples)
     {
+        SDL_QueueAudio(deviceId, d->info->buffer + d->info->samples, samples);
+        //std::this_thread::sleep_for(std::chrono::milliseconds(10));
         d->info->samples += samples * info->channels;
     }
     return 0;
@@ -62,18 +66,38 @@ static int frames_iterate_cb(void* user_data, const uint8_t* frame, int frame_si
 
 int main_audio(void)
 {
-    mp3dec_t mp3d;
-    mp3dec_io_t io;
-    mp3dec_file_info_t info;
-    memset(&info, 0, sizeof(info));
-    io.read = streamRead;
-    io.seek = streamSeek;
+    if (SDL_Init(SDL_INIT_AUDIO) < 0) {
+        std::cerr << "无法初始化 SDL: " << SDL_GetError() << std::endl;
+        return -1;
+    }
+    SDL_AudioSpec audioSpec;
+    audioSpec.freq = 44100;
+    audioSpec.format = AUDIO_S16SYS;
+    audioSpec.channels = 2;
+    audioSpec.silence = 0;
+    audioSpec.samples = 1024;
+    audioSpec.callback = nullptr; // 因为是推模式，所以这里为 nullptr
+    // 打开音频设备
+    if ((deviceId = SDL_OpenAudioDevice(nullptr, 0, &audioSpec, nullptr, SDL_AUDIO_ALLOW_ANY_CHANGE)) < 2) {
+        cout << "open audio device failed " << endl;
+        return -1;
+    }
+    SDL_PauseAudioDevice(deviceId, 0);
 
-    uint8_t* io_buf = (uint8_t*)malloc(MINIMP3_IO_SIZE);
-    FILE* file = fopen("assets/走过咖啡屋.mp3", "rb");
-    io.read_data = io.seek_data = file;
-    frames_iterate_data d = { &mp3d, &info, 0 };
-    mp3dec_init(&mp3d);
-    mp3dec_iterate_cb(&io, io_buf, MINIMP3_IO_SIZE, frames_iterate_cb, &d);
+    thread m_thread = std::thread([] {
+        mp3dec_t mp3d;
+        mp3dec_io_t io;
+        mp3dec_file_info_t info;
+        memset(&info, 0, sizeof(info));
+        io.read = streamRead;
+        io.seek = streamSeek;
+        uint8_t* io_buf = (uint8_t*)malloc(MINIMP3_IO_SIZE);
+        FILE* file = fopen("assets/走过咖啡屋.mp3", "rb");
+        io.read_data = io.seek_data = file;
+        frames_iterate_data d = { &mp3d, &info, 0 };
+        mp3dec_init(&mp3d);
+        mp3dec_iterate_cb(&io, io_buf, MINIMP3_IO_SIZE, frames_iterate_cb, &d);
+    });
+    m_thread.join();
 	return 0;
 }
