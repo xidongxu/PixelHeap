@@ -1,10 +1,5 @@
-﻿#include <iostream>
-#include <chrono>
-#include <thread>
-#include "audio.h"
+﻿#include "audio.h"
 #include "player.h"
-
-using namespace std;
 
 int main()
 {
