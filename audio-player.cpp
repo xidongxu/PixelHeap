@@ -1,12 +1,12 @@
-﻿// audio-player.cpp: 定义应用程序的入口点。
-//
-
-#include "audio-player.h"
+﻿#include <iostream>
+#include <chrono>
+#include <thread>
+#include "player.h"
 
 using namespace std;
 
 int main()
 {
-	cout << "Hello CMake." << endl;
+	main_player();
 	return 0;
 }
