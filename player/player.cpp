@@ -3,10 +3,6 @@
 #include <thread>
 
 #include "player.h"
-
-#define MINIMP3_IMPLEMENTATION
-#define MINIMP3_ALLOW_MONO_STEREO_TRANSITION
-#include "minimp3_ex.h"
 #include <SDL.h>
 
 using namespace std;

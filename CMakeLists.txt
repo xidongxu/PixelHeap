@@ -30,6 +30,13 @@ add_definitions(-DSDL_MAIN_HANDLED)
 include_directories(${CMAKE_CURRENT_SOURCE_DIR}/libs/minimp3/)
 
 # 子目录
+add_subdirectory(audio)
+# 链接 audio 库
+target_link_libraries(audio-player audio)
+# 包含 audio 头文件
+include_directories(${CMAKE_CURRENT_SOURCE_DIR}/audio/)
+
+# 子目录
 add_subdirectory(player)
 # 链接 player 库
 target_link_libraries(audio-player player)
