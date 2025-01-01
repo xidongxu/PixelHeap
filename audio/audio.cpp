@@ -14,77 +14,84 @@
 
 using namespace std;
 
-static size_t streamRead(void* buf, size_t size, void* user_data)
-{
+static size_t streamRead(void* buf, size_t size, void* user_data) {
     return fread(buf, 1, size, (FILE*)user_data);
 }
 
-static int streamSeek(uint64_t position, void* user_data)
-{
+static int streamSeek(uint64_t position, void* user_data) {
     return fseek((FILE*)user_data, position, SEEK_SET);
 }
 
-typedef struct
-{
+typedef struct {
     mp3dec_t* mp3d;
     mp3dec_file_info_t* info;
-    size_t allocated;
+    SDL_AudioDeviceID deviceId;
 } frames_iterate_data;
 
-SDL_AudioDeviceID deviceId;
+int resample_audio(uint8_t* input, int length, int src_rate, int dst_rate, uint8_t** output) {
+    SDL_AudioCVT cvt;
+    if (SDL_BuildAudioCVT(&cvt, AUDIO_S16SYS, 2, src_rate, AUDIO_S16SYS, 2, dst_rate) < 0)
+        return -1;
+    cvt.len = length;
+    cvt.buf = (uint8_t *)malloc(cvt.len * cvt.len_mult);
+    if (!cvt.buf)
+        return - 2;
+    memcpy(cvt.buf, input, length);
+    if (SDL_ConvertAudio(&cvt) < 0) {
+        SDL_free(cvt.buf);
+        return - 3;
+    }
+    *output = cvt.buf;
+    return cvt.len_cvt;
+}
 
-static int frames_iterate_cb(void* user_data, const uint8_t* frame, int frame_size, int free_format_bytes, size_t buf_size, uint64_t offset, mp3dec_frame_info_t* info)
-{
+static int frames_iterate_cb(void* user_data, const uint8_t* frame, int frame_size, int free_format_bytes, size_t buf_size, uint64_t offset, mp3dec_frame_info_t* info) {
     (void)buf_size;
     (void)offset;
     (void)free_format_bytes;
-    frames_iterate_data* d = (frames_iterate_data *)user_data;
-    d->info->channels = info->channels;
-    d->info->hz = info->hz;
-    d->info->layer = info->layer;
-    printf("%d %d %d\n", frame_size, (int)offset, info->channels);
-    if ((d->allocated - d->info->samples * sizeof(mp3d_sample_t)) < MINIMP3_MAX_SAMPLES_PER_FRAME * sizeof(mp3d_sample_t))
-    {
-        if (!d->allocated)
-            d->allocated = 1024 * 1024;
-        else
-            d->allocated *= 2;
-        mp3d_sample_t* alloc_buf = (mp3d_sample_t*)realloc(d->info->buffer, d->allocated);
-        if (!alloc_buf)
-            return MP3D_E_MEMORY;
-        d->info->buffer = alloc_buf;
-    }
-    int samples = mp3dec_decode_frame(d->mp3d, frame, frame_size, d->info->buffer + d->info->samples, info);
-    if (samples)
-    {
-        SDL_QueueAudio(deviceId, d->info->buffer + d->info->samples, samples);
-        //std::this_thread::sleep_for(std::chrono::milliseconds(10));
-        d->info->samples += samples * info->channels;
-    }
+    frames_iterate_data* user = (frames_iterate_data *)user_data;
+    user->info->channels = info->channels;
+    user->info->hz = info->hz;
+    user->info->layer = info->layer;
+    user->info->buffer = (mp3d_sample_t*)malloc(MINIMP3_MAX_SAMPLES_PER_FRAME * sizeof(mp3d_sample_t));
+    if (user->info->buffer == nullptr)
+        return -1;
+    int samples = mp3dec_decode_frame(user->mp3d, frame, frame_size, user->info->buffer, info) * sizeof(mp3d_sample_t);
+    if (samples <= 0)
+        return -2;
+    uint8_t* data = nullptr;
+    int size = resample_audio((uint8_t*)user->info->buffer, samples * info->channels, info->hz, 48000, &data);
+    if (data == nullptr || size <= 0)
+        return -3;
+    SDL_QueueAudio(user->deviceId, data, size);
+    free(user->info->buffer);
+    free(data);
+    while (SDL_GetQueuedAudioSize(user->deviceId) > 4096)
+        SDL_Delay(10);
     return 0;
 }
 
-int main_audio(void)
-{
+int main_audio(void) {
     if (SDL_Init(SDL_INIT_AUDIO) < 0) {
         std::cerr << "无法初始化 SDL: " << SDL_GetError() << std::endl;
         return -1;
     }
+    SDL_AudioDeviceID deviceId;
     SDL_AudioSpec audioSpec;
-    audioSpec.freq = 44100;
+    audioSpec.freq = 48000;
     audioSpec.format = AUDIO_S16SYS;
     audioSpec.channels = 2;
     audioSpec.silence = 0;
     audioSpec.samples = 1024;
-    audioSpec.callback = nullptr; // 因为是推模式，所以这里为 nullptr
+    audioSpec.callback = nullptr;
     // 打开音频设备
-    if ((deviceId = SDL_OpenAudioDevice(nullptr, 0, &audioSpec, nullptr, SDL_AUDIO_ALLOW_ANY_CHANGE)) < 2) {
+    if ((deviceId = SDL_OpenAudioDevice(nullptr, 0, &audioSpec, nullptr, 0)) < 2) {
         cout << "open audio device failed " << endl;
         return -1;
     }
     SDL_PauseAudioDevice(deviceId, 0);
-
-    thread m_thread = std::thread([] {
+    // 打开解码线程
+    thread m_thread = std::thread([deviceId] {
         mp3dec_t mp3d;
         mp3dec_io_t io;
         mp3dec_file_info_t info;
@@ -94,9 +101,10 @@ int main_audio(void)
         uint8_t* io_buf = (uint8_t*)malloc(MINIMP3_IO_SIZE);
         FILE* file = fopen("assets/走过咖啡屋.mp3", "rb");
         io.read_data = io.seek_data = file;
-        frames_iterate_data d = { &mp3d, &info, 0 };
+        frames_iterate_data user = { &mp3d, &info, deviceId };
         mp3dec_init(&mp3d);
-        mp3dec_iterate_cb(&io, io_buf, MINIMP3_IO_SIZE, frames_iterate_cb, &d);
+        mp3dec_iterate_cb(&io, io_buf, MINIMP3_IO_SIZE, frames_iterate_cb, &user);
+        free(io_buf);
     });
     m_thread.join();
 	return 0;
