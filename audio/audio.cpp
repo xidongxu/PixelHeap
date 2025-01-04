@@ -7,10 +7,6 @@
 #define MINIMP3_IMPLEMENTATION
 #define MINIMP3_ALLOW_MONO_STEREO_TRANSITION
 #include "minimp3_ex.h"
-#include <stdio.h>
-#include <math.h>
-#include <string.h>
-#include <time.h>
 
 using namespace std;
 
