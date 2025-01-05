@@ -4,6 +4,6 @@
 int main()
 {
 	main_audio();
-	//main_player();
+	main_player();
 	return 0;
 }
