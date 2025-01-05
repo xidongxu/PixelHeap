@@ -10,8 +10,6 @@
 
 using namespace std;
 
-SDL_AudioDeviceID deviceId;
-
 static size_t stream_read(void* buf, size_t size, void* user_data) {
     FILE* file = (FILE*)(user_data);
     if (file == nullptr)
@@ -79,18 +77,18 @@ public:
         int size = frame_resample((uint8_t*)buffer, samples * info->channels, info->hz, 48000, &data);
         if (data == nullptr || size <= 0)
             return -3;
-        SDL_QueueAudio(deviceId, data, size);
+        if (decoder->m_player) {
+            decoder->m_player->callback(decoder->m_player, data, size);
+        }
         free(buffer);
         free(data);
-        while (SDL_GetQueuedAudioSize(deviceId) > 4096)
-            SDL_Delay(10);
         return 0;
     }
-	int start(const char* url, uint64_t position) {
+	int start(const string &url, uint64_t position, double *duration) {
         if (m_file != nullptr) {
             fclose(m_file);
         }
-        m_file = fopen(url, "rb");
+        m_file = fopen(url.c_str(), "rb");
         if (m_file == nullptr) {
             return -1;
         }
@@ -103,13 +101,9 @@ public:
         mp3d_sample_t* buffer{};
         mp3dec_frame_info_t frame{};
         size_t samples = mp3dec_ex_read_frame(&m_handle, &buffer, &frame, 1);
-        if (samples > 0) {
-            printf("Frame after seek: bitrate=%d kbps, samplerate=%d Hz, channels=%d\n", frame.bitrate_kbps, frame.hz, frame.channels);
-            m_state = Exec;
-        } else {
-            m_state = End;
-        }
-		return 0;
+        *duration = (double)m_handle.samples / (frame.hz * frame.channels);
+        m_state = (samples > 0) ? Exec : End;
+		return (samples > 0) ? 0 : -2;
 	}
 	int puase() {
 		return 0;
@@ -120,6 +114,9 @@ public:
 	int stop() {
 		return 0;
 	}
+    void setPlayer(AudioPlayer* player) {
+        m_player = player;
+    }
 
 private:
 	AudioDecoder() : m_state(Pause) {
@@ -136,28 +133,77 @@ private:
 	mp3dec_ex_t m_handle{};
 	mp3dec_io_t m_stream{};
 	uint8_t m_buffer[MINIMP3_IO_SIZE]{};
+    AudioPlayer* m_player{};
+};
+
+class SDLPlayer : public AudioPlayer {
+public:
+    SDLPlayer() {
+        if (SDL_Init(SDL_INIT_AUDIO) < 0) {
+            std::cerr << "无法初始化 SDL: " << SDL_GetError() << std::endl;
+            return;
+        }
+        SDL_AudioSpec audioSpec;
+        audioSpec.freq = 48000;
+        audioSpec.format = AUDIO_S16SYS;
+        audioSpec.channels = 2;
+        audioSpec.silence = 0;
+        audioSpec.samples = 1024;
+        audioSpec.callback = nullptr;
+        // 打开音频设备
+        if ((m_device = SDL_OpenAudioDevice(nullptr, 0, &audioSpec, nullptr, 0)) < 2) {
+            cout << "open audio device failed " << endl;
+        }
+        SDL_PauseAudioDevice(m_device, 0);
+    }
+    ~SDLPlayer() {
+        // 关闭音频设备
+        if (m_device > 0) {
+            SDL_PauseAudioDevice(m_device, 1);
+            SDL_CloseAudioDevice(m_device);
+        }
+    }
+    int callback(AudioPlayer* player, uint8_t* frame, int length) override {
+        SDL_QueueAudio(m_device, frame, length);
+        while (SDL_GetQueuedAudioSize(m_device) > 4096)
+            SDL_Delay(10);
+        return 0;
+    }
+    int play() override {
+        m_decoder = &AudioDecoder::instance();
+        if (m_decoder) {
+            m_decoder->setPlayer(this);
+            m_decoder->start(url(), 0, &m_duration);
+            cout << "duration:" << m_duration << endl;
+        }
+        return 0;
+    }
+    int pause() override {
+        return 0;
+    }
+    int stop() override {
+        return 0;
+    }
+    int setPosition(double position) override {
+        return 0;
+    }
+    double position() override {
+        return m_position;
+    }
+    double duration() override {
+        return m_duration;
+    }
+
+private:
+    double m_position{};
+    double m_duration{};
+    AudioDecoder* m_decoder{};
+    SDL_AudioDeviceID m_device{};
 };
 
 int main_audio(void) {
-    if (SDL_Init(SDL_INIT_AUDIO) < 0) {
-        std::cerr << "无法初始化 SDL: " << SDL_GetError() << std::endl;
-        return -1;
-    }
-    // SDL_AudioDeviceID deviceId;
-    SDL_AudioSpec audioSpec;
-    audioSpec.freq = 48000;
-    audioSpec.format = AUDIO_S16SYS;
-    audioSpec.channels = 2;
-    audioSpec.silence = 0;
-    audioSpec.samples = 1024;
-    audioSpec.callback = nullptr;
-    // 打开音频设备
-    if ((deviceId = SDL_OpenAudioDevice(nullptr, 0, &audioSpec, nullptr, 0)) < 2) {
-        cout << "open audio device failed " << endl;
-        return -1;
-    }
-    SDL_PauseAudioDevice(deviceId, 0);
-    auto *decoder = &AudioDecoder::instance();
-    decoder->start("assets/走过咖啡屋.mp3", 0);
+    AudioPlayer* player = new SDLPlayer();
+    player->setUrl("assets/走过咖啡屋.mp3");
+    player->play();
 	return 0;
 }
