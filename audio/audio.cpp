@@ -73,7 +73,12 @@ public:
 		std::unique_lock<std::mutex> lock(m_locker);
 		m_cond.wait(lock, [&] { return m_data == state; });
 	}
-
+	void reset(StateType state) {
+		std::lock_guard<std::mutex> lock(m_locker);
+		m_data = std::move(state);
+		m_next = std::move(state);
+		m_cond.notify_all();
+	}
 private:
 	StateType m_data{};
 	StateType m_next{};
@@ -99,7 +104,7 @@ public:
 			if (decoder->state.next() == State::Exec) {
 				decoder->state.resolve(State::Exec);
 				mp3dec_iterate_cb(&decoder->m_stream, decoder->m_buffer, MINIMP3_IO_SIZE, iterator, decoder);
-
+				decoder->state.reset(State::Stop);
 			}
 			if (decoder->state.next() == State::Quit) {
 				decoder->state.resolve(State::Quit);
