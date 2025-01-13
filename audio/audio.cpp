@@ -83,7 +83,7 @@ private:
 
 class AudioDecoder {
 public:
-	enum class State { Idle, Exec, Quit };
+	enum class State { Stop, Pause, Exec, Quit };
 	AudioDecoder(AudioPlayer *player) : m_player(player) {
 		m_thread = std::thread([this] { AudioDecoder::executor(this); });
 	}
@@ -92,8 +92,8 @@ public:
 	}
 	static void executor(AudioDecoder* decoder) {
 		while (true) {
-			if (decoder->state.next() == State::Idle) {
-				decoder->state.resolve(State::Idle);
+			if (decoder->state.next() == State::Stop) {
+				decoder->state.resolve(State::Stop);
 				std::this_thread::sleep_for(chrono::milliseconds(100));
 			}
 			if (decoder->state.next() == State::Exec) {
@@ -102,18 +102,29 @@ public:
 
 			}
 			if (decoder->state.next() == State::Quit) {
+				decoder->state.resolve(State::Quit);
 				break;
 			}
 		}
-		decoder->state.resolve(State::Quit);
 	}
 	static int iterator(void* user_data, const uint8_t* frame, int frame_size, int free_format_bytes, size_t buf_size, uint64_t offset, mp3dec_frame_info_t* info) {
 		(void)buf_size;
 		(void)free_format_bytes;
+		AudioDecoder* decoder = (AudioDecoder*)(user_data);
+		while (decoder->state.next() == State::Pause) {
+			decoder->state.resolve(State::Pause);
+			std::this_thread::sleep_for(chrono::milliseconds(100));
+		}
+		if (decoder->state.next() == State::Stop) {
+			decoder->state.resolve(State::Stop);
+			return 1;
+		}
+		if (decoder->state.next() == State::Exec) {
+			decoder->state.resolve(State::Exec);
+		}
 		mp3d_sample_t* buffer = (mp3d_sample_t*)malloc(MINIMP3_MAX_SAMPLES_PER_FRAME * sizeof(mp3d_sample_t));
 		if (buffer == nullptr)
 			return -1;
-		AudioDecoder* decoder = (AudioDecoder*)(user_data);
 		int samples = mp3dec_decode_frame(&decoder->m_handle.mp3d, frame, frame_size, buffer, info) * sizeof(mp3d_sample_t);
 		if (samples < 0)
 			return -2;
@@ -127,13 +138,6 @@ public:
 		decoder->m_offset = offset;
 		free(buffer);
 		free(data);
-		while (decoder->state.next() == State::Idle) {
-			decoder->state.resolve(State::Idle);
-			std::this_thread::sleep_for(chrono::milliseconds(100));
-		}
-		if (decoder->state.next() == State::Exec) {
-			decoder->state.resolve(State::Exec);
-		}
 		return 0;
 	}
 	int start(const string& url, uint64_t position, double* duration) {
@@ -159,22 +163,22 @@ public:
 		return (samples > 0) ? 0 : -2;
 	}
 	int puase() {
-		if (state() != State::Idle) {
-			state.wait(State::Idle);
+		if (state() == State::Exec) {
+			state.wait(State::Pause);
 			return 0;
 		}
 		return -1;
 	}
 	int resume() {
-		if (state() == State::Idle) {
+		if (state() == State::Pause) {
 			state.wait(State::Exec);
 			return 0;
 		}
 		return -1;
 	}
 	int stop() {
-		if (state() != State::Idle) {
-			state.wait(State::Idle);
+		if (state() == State::Exec || state() == State::Pause) {
+			state.wait(State::Stop);
 			return 0;
 		}
 		return -1;
