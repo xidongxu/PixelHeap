@@ -243,21 +243,21 @@ public:
 	}
 	static void executor(AudioDecoder* decoder) {
 		while (true) {
-			if (decoder->state.target() == State::Pause) {
-				decoder->state.notify(State::Pause);
+			if (decoder->m_state.target() == State::Pause) {
+				decoder->m_state.notify(State::Pause);
 				std::this_thread::sleep_for(chrono::milliseconds(100));
 			}
-			if (decoder->state.target() == State::Stop) {
-				decoder->state.notify(State::Stop);
+			if (decoder->m_state.target() == State::Stop) {
+				decoder->m_state.notify(State::Stop);
 				std::this_thread::sleep_for(chrono::milliseconds(100));
 			}
-			if (decoder->state.target() == State::Exec) {
-				decoder->state.notify(State::Exec);
+			if (decoder->m_state.target() == State::Exec) {
+				decoder->m_state.notify(State::Exec);
 				const uint8_t* frame = nullptr;
 				mp3dec_frame_info_t info{};
 				int frame_size = mp3dec_reader_read(&decoder->m_reader, &frame, &info);
 				if (frame_size <= 0) {
-					decoder->state.reset(State::Stop);
+					decoder->m_state.reset(State::Stop);
 					decoder->m_player->callback(AudioPlayer::OnEnded);
 					continue;
 				}
@@ -280,18 +280,18 @@ public:
 				free(buffer);
 				free(data);
 			}
-			if (decoder->state.target() == State::Quit) {
+			if (decoder->m_state.target() == State::Quit) {
 				break;
 			}
 		}
-		decoder->state.notify(State::Quit);
+		decoder->m_state.notify(State::Quit);
 	}
 	int start(const string& url, uint64_t position, double* duration) {
 		int result = -1;
-		if (state() == State::Quit) {
+		if (m_state() == State::Quit) {
 			return result;
 		}
-		if (state() != State::Stop) {
+		if (m_state() != State::Stop) {
 			stop();
 		}
 		m_file = fopen(url.c_str(), "rb");
@@ -305,32 +305,32 @@ public:
 		result = mp3dec_reader_init(&m_reader, position, &m_offset);
 		if (result == 0) {
 			*duration = (double)m_reader.mp3dec.samples / (m_reader.mp3dec.info.hz * m_reader.mp3dec.info.channels);
-			state.wait(State::Exec);
+			m_state.wait(State::Exec);
 		}
 		m_seek = (m_reader.mp3dec.vbr_tag_found == 0);
 		return result;
 	}
 	int puase() {
-		if (state() == State::Exec) {
-			state.wait(State::Pause);
+		if (m_state() == State::Exec) {
+			m_state.wait(State::Pause);
 			m_player->callback(AudioPlayer::OnPause);
 			return 0;
 		}
 		return -1;
 	}
 	int resume() {
-		if (state() == State::Pause) {
-			state.wait(State::Exec);
+		if (m_state() == State::Pause) {
+			m_state.wait(State::Exec);
 			m_player->callback(AudioPlayer::OnPlay);
 			return 0;
 		}
 		return -1;
 	}
 	int stop() {
-		if (state() == State::Quit || state() == State::Stop) {
+		if (m_state() == State::Quit || m_state() == State::Stop) {
 			return -1;
 		}
-		state.wait(State::Stop);
+		m_state.wait(State::Stop);
 		if (m_file != nullptr) {
 			fclose(m_file);
 		}
@@ -338,19 +338,16 @@ public:
 		m_player->callback(AudioPlayer::OnStop);
 		return 0;
 	}
-	int seekAble() {
-		return m_seek;
-	}
-public:
-	StateUtil<State> state{};
+	bool seekAble() { return m_seek; }
 
 private:
-	bool m_seek{};
 	FILE* m_file{};
 	uint64_t m_offset{};
+	atomic<bool> m_seek{};
 	std::thread m_thread{};
 	mp3dec_reader_t m_reader{};
 	AudioPlayer* m_player{};
+	StateUtil<State> m_state{};
 };
 
 class SDLPlayer : public AudioPlayer {
@@ -400,7 +397,7 @@ public:
 			break;
 		case OnUpdate:
 			m_position = position;
-			cout << " position = " << m_position << "/" << m_duration << endl;
+			cout << "position = " << m_position << "/" << m_duration << endl;
 			SDL_QueueAudio(m_device, frame, length);
 			while (SDL_GetQueuedAudioSize(m_device) > 4096) {
 				SDL_Delay(10);
