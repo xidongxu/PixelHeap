@@ -3,7 +3,6 @@
 #include <thread>
 #include <mutex>
 #include <condition_variable>
-#include <functional>
 #include <SDL.h>
 #include "audio.h"
 
@@ -44,45 +43,75 @@ static int frame_resample(uint8_t* input, int length, int src_rate, int dst_rate
 	return cvt.len_cvt;
 }
 
+class Semaphore {
+public:
+	explicit Semaphore(int count = 0) : m_count(count) {}
+
+	void notify() {
+		std::unique_lock<std::mutex> lock(m_mutex);
+		++m_count;
+		m_cond.notify_one();
+	}
+
+	void wait() {
+		std::unique_lock<std::mutex> lock(m_mutex);
+		m_cond.wait(lock, [this]() { return m_count > 0; });
+		--m_count;
+	}
+
+	bool wait_for(int time) {
+		std::unique_lock<std::mutex> lock(m_mutex);
+		auto result = m_cond.wait_for(lock, std::chrono::milliseconds(time), [this]() { return m_count > 0; });
+		if (result) {
+			--m_count;
+		}
+		return result;
+	}
+private:
+	int m_count;
+	std::mutex m_mutex;
+	std::condition_variable m_cond;
+};
+
 template <typename StateType>
 class StateUtil {
 public:
 	explicit StateUtil(StateType state = StateType())
-		: m_data(state), m_next(state) {
+		: m_origin(state), m_target(state) {
 	}
 	StateType operator()() {
-		std::lock_guard<std::mutex> lock(m_locker);
-		return m_data;
+		std::lock_guard<std::mutex> lock(m_mutex);
+		return m_origin;
 	}
-	StateType next() {
-		std::lock_guard<std::mutex> lock(m_locker);
-		return m_next;
+	StateType target() {
+		std::lock_guard<std::mutex> lock(m_mutex);
+		return m_target;
 	}
 	void notify(StateType state) {
-		std::lock_guard<std::mutex> lock(m_locker);
-		if (m_data == state)
-			return;
-		m_data = state;
-		m_cond.notify_all();
+		std::lock_guard<std::mutex> lock(m_mutex);
+		if (m_target == state && m_origin != state) {
+			m_origin = state;
+			m_signal.notify();
+		}
 	}
 	void wait(StateType state) {
 		{
-			std::lock_guard<std::mutex> lock(m_locker);
-			m_next = state;
+			std::lock_guard<std::mutex> lock(m_mutex);
+			m_target = state;
+			while (m_signal.wait_for(0)) {}
 		}
-		std::unique_lock<std::mutex> lock(m_locker);
-		m_cond.wait(lock, [&] { return m_data == state; });
+		m_signal.wait();
 	}
 	void reset(StateType state) {
-		std::lock_guard<std::mutex> lock(m_locker);
-		m_data = m_next = state;
-		m_cond.notify_all();
+		std::lock_guard<std::mutex> lock(m_mutex);
+		m_origin = m_target = state;
+		m_signal.notify();
 	}
 private:
-	StateType m_data{};
-	StateType m_next{};
-	std::mutex m_locker{};
-	std::condition_variable m_cond{};
+	std::mutex m_mutex{};
+	StateType m_origin{};
+	StateType m_target{};
+	Semaphore m_signal{};
 };
 
 typedef struct mp3dec_reader {
@@ -214,15 +243,15 @@ public:
 	}
 	static void executor(AudioDecoder* decoder) {
 		while (true) {
-			if (decoder->state.next() == State::Pause) {
+			if (decoder->state.target() == State::Pause) {
 				decoder->state.notify(State::Pause);
 				std::this_thread::sleep_for(chrono::milliseconds(100));
 			}
-			if (decoder->state.next() == State::Stop) {
+			if (decoder->state.target() == State::Stop) {
 				decoder->state.notify(State::Stop);
 				std::this_thread::sleep_for(chrono::milliseconds(100));
 			}
-			if (decoder->state.next() == State::Exec) {
+			if (decoder->state.target() == State::Exec) {
 				decoder->state.notify(State::Exec);
 				const uint8_t* frame = nullptr;
 				mp3dec_frame_info_t info{};
@@ -233,7 +262,7 @@ public:
 					continue;
 				}
 				decoder->m_offset += frame_size;
-				double position = (double)(decoder->m_offset / (info.bitrate_kbps * 1000 / 8));
+				double position = double(decoder->m_offset) / (double(info.bitrate_kbps) * 1000.0 / 8.0);
 				mp3d_sample_t* buffer = (mp3d_sample_t*)malloc(MINIMP3_MAX_SAMPLES_PER_FRAME * sizeof(mp3d_sample_t));
 				if (buffer == nullptr) {
 					continue;
@@ -251,7 +280,7 @@ public:
 				free(buffer);
 				free(data);
 			}
-			if (decoder->state.next() == State::Quit) {
+			if (decoder->state.target() == State::Quit) {
 				break;
 			}
 		}
