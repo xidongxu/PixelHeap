@@ -48,7 +48,7 @@ template <typename StateType>
 class StateUtil {
 public:
 	explicit StateUtil(StateType state = StateType())
-		: m_data(std::move(state)), m_next(std::move(state)) {
+		: m_data(state), m_next(state) {
 	}
 	StateType operator()() {
 		std::lock_guard<std::mutex> lock(m_locker);
@@ -62,21 +62,20 @@ public:
 		std::lock_guard<std::mutex> lock(m_locker);
 		if (m_data == state)
 			return;
-		m_data = std::move(state);
+		m_data = state;
 		m_cond.notify_all();
 	}
 	void wait(StateType state) {
 		{
 			std::lock_guard<std::mutex> lock(m_locker);
-			m_next = std::move(state);
+			m_next = state;
 		}
 		std::unique_lock<std::mutex> lock(m_locker);
 		m_cond.wait(lock, [&] { return m_data == state; });
 	}
 	void reset(StateType state) {
 		std::lock_guard<std::mutex> lock(m_locker);
-		m_data = std::move(state);
-		m_next = std::move(state);
+		m_data = m_next = state;
 		m_cond.notify_all();
 	}
 private:
@@ -104,7 +103,6 @@ int mp3dec_reader_init(mp3dec_reader_t *reader, uint64_t position) {
 		return MP3D_E_PARAM;
 	}
 	int result = 0;
-	mp3d_sample_t* sample{};
 	mp3dec_io_t* io = &reader->stream;
 	reader->buf_size = sizeof(reader->buffer);
 	result = mp3dec_ex_open_cb(&reader->mp3dec, io, MP3D_SEEK_TO_BYTE);
@@ -129,16 +127,19 @@ int mp3dec_reader_init(mp3dec_reader_t *reader, uint64_t position) {
 	}
 	size_t id3v2size = mp3dec_skip_id3v2(reader->buffer, reader->filled);
 	if (id3v2size) {
-		if (io->seek(id3v2size, io->seek_data))
+		if (io->seek(id3v2size, io->seek_data)) {
 			return MP3D_E_IOERROR;
+		}
 		reader->filled = io->read(reader->buffer, reader->buf_size, io->read_data);
-		if (reader->filled > reader->buf_size)
+		if (reader->filled > reader->buf_size) {
 			return MP3D_E_IOERROR;
+		}
 		reader->readed += id3v2size;
 	} else {
 		size_t readed = io->read(reader->buffer + MINIMP3_ID3_DETECT_SIZE, reader->buf_size - MINIMP3_ID3_DETECT_SIZE, io->read_data);
-		if (readed > (reader->buf_size - MINIMP3_ID3_DETECT_SIZE))
+		if (readed > (reader->buf_size - MINIMP3_ID3_DETECT_SIZE)) {
 			return MP3D_E_IOERROR;
+		}
 		reader->filled += readed;
 	}
 	if (reader->filled < MINIMP3_BUF_SIZE) {
@@ -156,7 +157,7 @@ int mp3dec_reader_read(mp3dec_reader_t* reader, const uint8_t **frame, mp3dec_fr
 	if (!reader || !reader->buffer || (size_t)-1 == reader->buf_size || reader->buf_size < MINIMP3_BUF_SIZE) {
 		return MP3D_E_PARAM;
 	}
-	while (1) {
+	while (true) {
 		mp3dec_io_t* io = &reader->stream;
 		reader->readed += reader->frame_size;
 		reader->consumed += reader->index + reader->frame_size;
@@ -183,8 +184,9 @@ int mp3dec_reader_read(mp3dec_reader_t* reader, const uint8_t **frame, mp3dec_fr
 			reader->consumed += reader->index;
 			continue;
 		}
-		if (!reader->frame_size)
+		if (!reader->frame_size) {
 			break;
+		}
 		const uint8_t* hdr = reader->buffer + reader->consumed + reader->index;
 		if (frame_info != nullptr) {
 			frame_info->channels = HDR_IS_MONO(hdr) ? 1 : 2;
@@ -229,15 +231,18 @@ public:
 					continue;
 				}
 				mp3d_sample_t* buffer = (mp3d_sample_t*)malloc(MINIMP3_MAX_SAMPLES_PER_FRAME * sizeof(mp3d_sample_t));
-				if (buffer == nullptr)
+				if (buffer == nullptr) {
 					continue;
+				}
 				int samples = mp3dec_decode_frame(&decoder->m_reader.mp3dec.mp3d, frame, frame_size, buffer, &info) * sizeof(mp3d_sample_t);
-				if (samples < 0)
+				if (samples < 0) {
 					continue;
+				}
 				uint8_t* data = nullptr;
 				int size = frame_resample((uint8_t*)buffer, samples * info.channels, info.hz, 48000, &data);
-				if (data == nullptr || size <= 0)
+				if (data == nullptr || size <= 0) {
 					continue;
+				}
 				if (decoder->m_player) {
 					decoder->m_player->callback(decoder->m_player, data, size);
 				}
@@ -251,22 +256,27 @@ public:
 		}
 	}
 	int start(const string& url, uint64_t position, double* duration) {
-		if (m_file != nullptr) {
-			fclose(m_file);
+		int result = -1;
+		if (state() == State::Quit) {
+			return result;
+		}
+		if (state() != State::Stop) {
+			stop();
 		}
 		m_file = fopen(url.c_str(), "rb");
 		if (m_file == nullptr) {
-			return -1;
+			return result;
 		}
 		m_reader.stream.read_data = m_file;
 		m_reader.stream.read = stream_read;
 		m_reader.stream.seek_data = m_file;
 		m_reader.stream.seek = stream_seek;
-		int result = mp3dec_reader_init(&m_reader, position);
+		result = mp3dec_reader_init(&m_reader, position);
 		if (result == 0) {
 			*duration = (double)m_reader.mp3dec.samples / (m_reader.mp3dec.info.hz * m_reader.mp3dec.info.channels);
 			state.wait(State::Exec);
 		}
+		m_seek = (m_reader.mp3dec.vbr_tag_found == 0);
 		return result;
 	}
 	int puase() {
@@ -294,10 +304,14 @@ public:
 		mp3dec_reader_deinit(&m_reader);
 		return -1;
 	}
+	int seekAble() {
+		return m_seek;
+	}
 public:
 	StateUtil<State> state{};
 
 private:
+	bool m_seek{};
 	FILE* m_file{};
 	std::thread m_thread{};
 	mp3dec_reader_t m_reader{};
