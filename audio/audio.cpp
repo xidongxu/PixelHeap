@@ -37,7 +37,7 @@ static int frame_resample(uint8_t* input, int length, int src_rate, int dst_rate
 		return -2;
 	memcpy(cvt.buf, input, length);
 	if (SDL_ConvertAudio(&cvt) < 0) {
-		SDL_free(cvt.buf);
+		free(cvt.buf);
 		return -3;
 	}
 	*output = cvt.buf;
@@ -86,6 +86,120 @@ private:
 	std::condition_variable m_cond{};
 };
 
+typedef struct mp3dec_reader {
+	mp3dec_ex_t mp3dec;
+	mp3dec_io_t stream;
+	size_t buf_size;
+	size_t filled;
+	size_t consumed;
+	int eof;
+	int index;
+	int frame_size;
+	uint64_t readed;
+	uint8_t buffer[MINIMP3_IO_SIZE]{};
+} mp3dec_reader_t;
+
+int mp3dec_reader_init(mp3dec_reader_t *reader, uint64_t position) {
+	if (!reader || (size_t)-1 == sizeof(reader->buffer) || sizeof(reader->buffer) < MINIMP3_BUF_SIZE) {
+		return MP3D_E_PARAM;
+	}
+	int result = 0;
+	mp3d_sample_t* sample{};
+	mp3dec_io_t* io = &reader->stream;
+	reader->buf_size = sizeof(reader->buffer);
+	result = mp3dec_ex_open_cb(&reader->mp3dec, io, MP3D_SEEK_TO_BYTE);
+	if (result < 0) {
+		return result;
+	}
+	position = position * (reader->mp3dec.info.bitrate_kbps * 1000 / 8);
+	position = position + reader->mp3dec.start_offset;
+	result = mp3dec_ex_seek(&reader->mp3dec, position);
+	if (result < 0) {
+		return result;
+	}
+	reader->filled = io->read(reader->buffer, MINIMP3_ID3_DETECT_SIZE, io->read_data);
+	reader->consumed = 0;
+	reader->readed = 0;
+	reader->eof = 0;
+	if (reader->filled > MINIMP3_ID3_DETECT_SIZE) {
+		return MP3D_E_IOERROR;
+	}
+	if (MINIMP3_ID3_DETECT_SIZE != reader->filled) {
+		return 0;
+	}
+	size_t id3v2size = mp3dec_skip_id3v2(reader->buffer, reader->filled);
+	if (id3v2size) {
+		if (io->seek(id3v2size, io->seek_data))
+			return MP3D_E_IOERROR;
+		reader->filled = io->read(reader->buffer, reader->buf_size, io->read_data);
+		if (reader->filled > reader->buf_size)
+			return MP3D_E_IOERROR;
+		reader->readed += id3v2size;
+	} else {
+		size_t readed = io->read(reader->buffer + MINIMP3_ID3_DETECT_SIZE, reader->buf_size - MINIMP3_ID3_DETECT_SIZE, io->read_data);
+		if (readed > (reader->buf_size - MINIMP3_ID3_DETECT_SIZE))
+			return MP3D_E_IOERROR;
+		reader->filled += readed;
+	}
+	if (reader->filled < MINIMP3_BUF_SIZE) {
+		mp3dec_skip_id3v1(reader->buffer, &reader->filled);
+	}
+	return 0;
+}
+
+int mp3dec_reader_deinit(mp3dec_reader_t* reader) {
+	mp3dec_ex_close(&reader->mp3dec);
+	return 0;
+}
+
+int mp3dec_reader_read(mp3dec_reader_t* reader, const uint8_t **frame, mp3dec_frame_info_t *frame_info) {
+	if (!reader || !reader->buffer || (size_t)-1 == reader->buf_size || reader->buf_size < MINIMP3_BUF_SIZE) {
+		return MP3D_E_PARAM;
+	}
+	while (1) {
+		mp3dec_io_t* io = &reader->stream;
+		reader->readed += reader->frame_size;
+		reader->consumed += reader->index + reader->frame_size;
+		if (!reader->eof && reader->filled - reader->consumed < MINIMP3_BUF_SIZE) {
+			/* keep minimum 10 consecutive mp3 frames (~16KB) worst case */
+			std::memmove(reader->buffer, reader->buffer + reader->consumed, reader->filled - reader->consumed);
+			reader->filled -= reader->consumed;
+			reader->consumed = 0;
+			size_t readed = io->read(reader->buffer + reader->filled, reader->buf_size - reader->filled, io->read_data);
+			if (readed > (reader->buf_size - reader->filled)) {
+				return MP3D_E_IOERROR;
+			}
+			if (readed != (reader->buf_size - reader->filled)) {
+				reader->eof = 1;
+			}
+			reader->filled += readed;
+			if (reader->eof) {
+				mp3dec_skip_id3v1(reader->buffer, &reader->filled);
+			}
+		}
+		int free_bytes = 0;
+		reader->index = mp3d_find_frame(reader->buffer + reader->consumed, reader->filled - reader->consumed, &free_bytes, &reader->frame_size);
+		if (reader->index && !reader->frame_size) {
+			reader->consumed += reader->index;
+			continue;
+		}
+		if (!reader->frame_size)
+			break;
+		const uint8_t* hdr = reader->buffer + reader->consumed + reader->index;
+		if (frame_info != nullptr) {
+			frame_info->channels = HDR_IS_MONO(hdr) ? 1 : 2;
+			frame_info->hz = hdr_sample_rate_hz(hdr);
+			frame_info->layer = 4 - HDR_GET_LAYER(hdr);
+			frame_info->bitrate_kbps = hdr_bitrate_kbps(hdr);
+			frame_info->frame_bytes = reader->frame_size;
+		}
+		reader->readed += reader->index;
+		*frame = hdr;
+		return reader->frame_size;
+	}
+	return 0;
+}
+
 class AudioDecoder {
 public:
 	enum class State { Stop, Pause, Exec, Quit };
@@ -97,53 +211,44 @@ public:
 	}
 	static void executor(AudioDecoder* decoder) {
 		while (true) {
+			if (decoder->state.next() == State::Pause) {
+				decoder->state.resolve(State::Pause);
+				std::this_thread::sleep_for(chrono::milliseconds(100));
+			}
 			if (decoder->state.next() == State::Stop) {
 				decoder->state.resolve(State::Stop);
 				std::this_thread::sleep_for(chrono::milliseconds(100));
 			}
 			if (decoder->state.next() == State::Exec) {
 				decoder->state.resolve(State::Exec);
-				mp3dec_iterate_cb(&decoder->m_stream, decoder->m_buffer, MINIMP3_IO_SIZE, iterator, decoder);
-				decoder->state.reset(State::Stop);
+				const uint8_t* frame = nullptr;
+				mp3dec_frame_info_t info{};
+				int frame_size = mp3dec_reader_read(&decoder->m_reader, &frame, &info);
+				if (frame_size <= 0) {
+					decoder->state.reset(State::Stop);
+					continue;
+				}
+				mp3d_sample_t* buffer = (mp3d_sample_t*)malloc(MINIMP3_MAX_SAMPLES_PER_FRAME * sizeof(mp3d_sample_t));
+				if (buffer == nullptr)
+					continue;
+				int samples = mp3dec_decode_frame(&decoder->m_reader.mp3dec.mp3d, frame, frame_size, buffer, &info) * sizeof(mp3d_sample_t);
+				if (samples < 0)
+					continue;
+				uint8_t* data = nullptr;
+				int size = frame_resample((uint8_t*)buffer, samples * info.channels, info.hz, 48000, &data);
+				if (data == nullptr || size <= 0)
+					continue;
+				if (decoder->m_player) {
+					decoder->m_player->callback(decoder->m_player, data, size);
+				}
+				free(buffer);
+				free(data);
 			}
 			if (decoder->state.next() == State::Quit) {
 				decoder->state.resolve(State::Quit);
 				break;
 			}
 		}
-	}
-	static int iterator(void* user_data, const uint8_t* frame, int frame_size, int free_format_bytes, size_t buf_size, uint64_t offset, mp3dec_frame_info_t* info) {
-		(void)buf_size;
-		(void)free_format_bytes;
-		AudioDecoder* decoder = (AudioDecoder*)(user_data);
-		while (decoder->state.next() == State::Pause) {
-			decoder->state.resolve(State::Pause);
-			std::this_thread::sleep_for(chrono::milliseconds(100));
-		}
-		if (decoder->state.next() == State::Stop) {
-			decoder->state.resolve(State::Stop);
-			return 1;
-		}
-		if (decoder->state.next() == State::Exec) {
-			decoder->state.resolve(State::Exec);
-		}
-		mp3d_sample_t* buffer = (mp3d_sample_t*)malloc(MINIMP3_MAX_SAMPLES_PER_FRAME * sizeof(mp3d_sample_t));
-		if (buffer == nullptr)
-			return -1;
-		int samples = mp3dec_decode_frame(&decoder->m_handle.mp3d, frame, frame_size, buffer, info) * sizeof(mp3d_sample_t);
-		if (samples < 0)
-			return -2;
-		uint8_t* data = nullptr;
-		int size = frame_resample((uint8_t*)buffer, samples * info->channels, info->hz, 48000, &data);
-		if (data == nullptr || size <= 0)
-			return -3;
-		if (decoder->m_player) {
-			decoder->m_player->callback(decoder->m_player, data, size);
-		}
-		decoder->m_offset = offset;
-		free(buffer);
-		free(data);
-		return 0;
 	}
 	int start(const string& url, uint64_t position, double* duration) {
 		if (m_file != nullptr) {
@@ -153,19 +258,16 @@ public:
 		if (m_file == nullptr) {
 			return -1;
 		}
-		m_stream.read_data = m_file;
-		m_stream.read = stream_read;
-		m_stream.seek_data = m_file;
-		m_stream.seek = stream_seek;
-		mp3dec_ex_open_cb(&m_handle, &m_stream, MP3D_SEEK_TO_BYTE);
-		mp3d_sample_t* buffer{};
-		mp3dec_frame_info_t frame{};
-		size_t samples = mp3dec_ex_read_frame(&m_handle, &buffer, &frame, 1);
-		*duration = (double)m_handle.samples / (frame.hz * frame.channels);
-		m_offset = position;
-		mp3dec_ex_seek(&m_handle, position);
-		state.wait(State::Exec);
-		return (samples > 0) ? 0 : -2;
+		m_reader.stream.read_data = m_file;
+		m_reader.stream.read = stream_read;
+		m_reader.stream.seek_data = m_file;
+		m_reader.stream.seek = stream_seek;
+		int result = mp3dec_reader_init(&m_reader, position);
+		if (result == 0) {
+			*duration = (double)m_reader.mp3dec.samples / (m_reader.mp3dec.info.hz * m_reader.mp3dec.info.channels);
+			state.wait(State::Exec);
+		}
+		return result;
 	}
 	int puase() {
 		if (state() == State::Exec) {
@@ -186,6 +288,10 @@ public:
 			state.wait(State::Stop);
 			return 0;
 		}
+		if (m_file != nullptr) {
+			fclose(m_file);
+		}
+		mp3dec_reader_deinit(&m_reader);
 		return -1;
 	}
 public:
@@ -193,12 +299,9 @@ public:
 
 private:
 	FILE* m_file{};
-	uint64_t m_offset{};
 	std::thread m_thread{};
-	mp3dec_ex_t m_handle{};
-	mp3dec_io_t m_stream{};
+	mp3dec_reader_t m_reader{};
 	AudioPlayer* m_player{};
-	uint8_t m_buffer[MINIMP3_IO_SIZE]{};
 };
 
 class SDLPlayer : public AudioPlayer {
@@ -257,6 +360,8 @@ public:
 		return 0;
 	}
 	int setPosition(double position) override {
+		m_decoder.stop();
+		m_decoder.start(url(), position, &m_duration);
 		return 0;
 	}
 	double position() override {
@@ -285,11 +390,15 @@ int main_audio(void) {
 		cout << "================== start ==================" << endl;
 		player->play();
 		std::this_thread::sleep_for(chrono::seconds(5));
-		cout << "================== stop  ==================" << endl;
-		player->stop();
+		cout << "================== set position  ==================" << endl;
+		player->setPosition(30);
 		std::this_thread::sleep_for(chrono::seconds(5));
-		cout << "================== start ==================" << endl;
-		player->play();
+		cout << "================== set position  ==================" << endl;
+		player->setPosition(60);
+		std::this_thread::sleep_for(chrono::seconds(5));
+		cout << "================== set position  ==================" << endl;
+		player->setPosition(90);
+		std::this_thread::sleep_for(chrono::seconds(10000));
 	});
 	m_thread.join();
 	return 0;
