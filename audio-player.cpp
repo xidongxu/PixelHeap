@@ -1,5 +1,6 @@
 ﻿#include "audio.h"
 #include "player.h"
+#include "fastlz.h"
 
 int main()
 {

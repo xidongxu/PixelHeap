@@ -455,6 +455,7 @@ int main_audio(void) {
 	AudioPlayer* player = new SDLPlayer();
 	player->setUrl("assets/走过咖啡屋.mp3");
 	player->play();
+#if 0
 	auto m_thread = std::thread([player] {
 		std::this_thread::sleep_for(chrono::seconds(5));
 		cout << "================== pause ==================" << endl;
@@ -474,5 +475,6 @@ int main_audio(void) {
 		std::this_thread::sleep_for(chrono::seconds(10000));
 	});
 	m_thread.join();
+#endif
 	return 0;
 }
