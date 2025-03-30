@@ -70,9 +70,16 @@ include_directories(${CMAKE_SOURCE_DIR}/player/)
 # 子目录
 add_subdirectory(${CMAKE_SOURCE_DIR}/libs/FastLZ)
 # 链接 audio 库
-target_link_libraries(audio-player  fastlz)
+target_link_libraries(audio-player fastlz)
 # 包含 audio 头文件
 include_directories(${CMAKE_SOURCE_DIR}/libs/FastLZ/)
+
+# 子目录
+add_subdirectory(callstack)
+# 链接 debug 库
+target_link_libraries(audio-player callstack)
+# 包含 debug 头文件
+include_directories(${CMAKE_SOURCE_DIR}/callstack/)
 
 if (CMAKE_VERSION VERSION_GREATER 3.12)
     set_property(TARGET audio-player PROPERTY CXX_STANDARD 20)
