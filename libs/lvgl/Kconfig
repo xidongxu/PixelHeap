@@ -1,4 +1,4 @@
-# Kconfig file for LVGL v9.2.1
+# Kconfig file for LVGL v9.2.2
 
 menu "LVGL configuration"
 
@@ -375,7 +375,7 @@ menu "LVGL configuration"
 		config LV_USE_PXP
 		bool "Use NXP's PXP on iMX RTxxx platforms"
 		default n
-		
+
 		config LV_USE_DRAW_PXP
 		bool "Use PXP for drawing"
 			depends on LV_USE_PXP
@@ -726,18 +726,6 @@ menu "LVGL configuration"
 		config LV_ATTRIBUTE_MEM_ALIGN_SIZE
 			int "Required alignment size for buffers"
 			default 1
-
-		config LV_ATTRIBUTE_MEM_ALIGN
-			string "Will be added where memories needs to be aligned (with -Os data might not be aligned to boundary by default)."
-			default ""
-			help
-				E.g. __attribute__((aligned(LV_ATTRIBUTE_MEM_ALIGN_SIZE)))
-
-		config LV_ATTRIBUTE_LARGE_CONST
-			string "Attribute to mark large constant arrays for example font's bitmaps"
-			default ""
-			help
-				E.g. __attribute__((section("DataQuickAccess"))) 
 
 		config LV_ATTRIBUTE_FAST_MEM_USE_IRAM
 			bool "Set IRAM as LV_ATTRIBUTE_FAST_MEM"
@@ -1358,13 +1346,6 @@ menu "LVGL configuration"
 			bool "Enable system monitor component"
 			default n
 
-		config LV_SYSMON_GET_IDLE
-			string "Get the idle percentage."
-			depends on LV_USE_SYSMON
-			default "lv_timer_get_idle"
-			help
-				E.g. uint32_t my_get_idle(void);
-
 		config LV_USE_PERF_MONITOR
 			bool "Show CPU usage and FPS count"
 			depends on LV_USE_SYSMON
@@ -1511,7 +1492,7 @@ menu "LVGL configuration"
 			default 2 # LVGL_VERSION_MINOR
 		config LVGL_VERSION_PATCH
 			int
-			default 1 # LVGL_VERSION_PATCH
+			default 2 # LVGL_VERSION_PATCH
 	endmenu
 
 	menu "Devices"
