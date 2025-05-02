@@ -90,6 +90,7 @@ lv_result_t lv_thread_init(
                            0,
                            NULL));
     if(!*thread) {
+        free(init_data);
         return LV_RESULT_INVALID;
     }
 
@@ -105,11 +106,17 @@ lv_result_t lv_thread_delete(lv_thread_t * thread)
 {
     lv_result_t result = LV_RESULT_OK;
 
-    if(!TerminateThread(thread, 0)) {
+    if (!thread || !*thread) {
+        return LV_RESULT_INVALID;
+    }
+
+    DWORD wait_res = WaitForSingleObject(*thread, 5000);
+    if (wait_res != WAIT_OBJECT_0) {
         result = LV_RESULT_INVALID;
     }
 
-    CloseHandle(thread);
+    CloseHandle(*thread);
+    *thread = NULL;
 
     return result;
 }
