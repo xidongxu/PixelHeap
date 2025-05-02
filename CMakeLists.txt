@@ -82,11 +82,11 @@ target_link_libraries(audio-player callstack)
 include_directories(${CMAKE_SOURCE_DIR}/callstack/)
 
 # 子目录
-add_subdirectory(${CMAKE_SOURCE_DIR}/libs/lvgl-9.2.2)
+add_subdirectory(${CMAKE_SOURCE_DIR}/libs/lvgl-9.2.1)
 # 链接 audio 库
 target_link_libraries(audio-player lvgl lvgl::demos lvgl::examples)
 # 包含 audio 头文件
-include_directories(${CMAKE_SOURCE_DIR}/libs/lvgl-9.2.2/)
+include_directories(${CMAKE_SOURCE_DIR}/libs/lvgl-9.2.1/)
 
 if (CMAKE_VERSION VERSION_GREATER 3.12)
     set_property(TARGET audio-player PROPERTY CXX_STANDARD 20)
