@@ -88,6 +88,37 @@ target_link_libraries(audio-player callstack)
 # 包含 debug 头文件
 include_directories(${CMAKE_SOURCE_DIR}/callstack/)
 
+set(FREERTOS_KERNEL_PATH ${CMAKE_SOURCE_DIR}/libs/FreeRTOS-LTS/FreeRTOS/FreeRTOS-Kernel)
+add_library(freertos_config INTERFACE)
+target_include_directories(freertos_config INTERFACE ${FREERTOS_KERNEL_PATH}/examples/template_configuration/)
+if (DEFINED FREERTOS_SMP_EXAMPLE AND FREERTOS_SMP_EXAMPLE STREQUAL "1")
+    message(STATUS "Build FreeRTOS SMP example")
+    add_compile_options( -DconfigNUMBER_OF_CORES=2 -DconfigUSE_PASSIVE_IDLE_HOOK=0 )
+endif()
+
+set(FREERTOS_HEAP "4" CACHE STRING "" FORCE)
+set(FREERTOS_PORT "MSVC_MINGW" CACHE STRING "" FORCE)
+add_subdirectory(${FREERTOS_KERNEL_PATH} FreeRTOS-Kernel)
+target_compile_options(freertos_kernel PRIVATE
+    ### Gnu/Clang C Options
+    $<$<COMPILE_LANG_AND_ID:C,GNU>:-fdiagnostics-color=always>
+    $<$<COMPILE_LANG_AND_ID:C,Clang>:-fcolor-diagnostics>
+
+    $<$<COMPILE_LANG_AND_ID:C,Clang,GNU>:-Wall>
+    $<$<COMPILE_LANG_AND_ID:C,Clang,GNU>:-Wextra>
+    $<$<COMPILE_LANG_AND_ID:C,Clang,GNU>:-Wpedantic>
+    $<$<COMPILE_LANG_AND_ID:C,Clang,GNU>:-Werror>
+    $<$<COMPILE_LANG_AND_ID:C,Clang,GNU>:-Wconversion>
+    $<$<COMPILE_LANG_AND_ID:C,Clang>:-Weverything>
+    # Suppressions required to build clean with clang.
+    $<$<COMPILE_LANG_AND_ID:C,Clang>:-Wno-unused-macros>
+    $<$<COMPILE_LANG_AND_ID:C,Clang>:-Wno-padded>
+    $<$<COMPILE_LANG_AND_ID:C,Clang>:-Wno-missing-variable-declarations>
+    $<$<COMPILE_LANG_AND_ID:C,Clang>:-Wno-covered-switch-default>
+    $<$<COMPILE_LANG_AND_ID:C,Clang>:-Wno-cast-align> )
+target_link_libraries(${PROJECT_NAME} freertos_kernel freertos_config)
+set_property(TARGET freertos_kernel PROPERTY C_STANDARD 90)
+
 if (CMAKE_VERSION VERSION_GREATER 3.12)
-    set_property(TARGET audio-player PROPERTY CXX_STANDARD 20)
+    set_property(TARGET audio-player PROPERTY CXX_STANDARD 11)
 endif()
