@@ -32,15 +32,14 @@ void* pthread_entry(void* parameter) {
 void tx_application_define(void* first_unused_memory) {
     static pthread_t pthread = { NULL };
     static pthread_attr_t ptattr = { NULL };
-    static uint32_t memory[256 * 1024 / sizeof(uint32_t)] = { NULL };
-
-    void *pheap = (void*)posix_initialize(memory);
-    pthread_attr_init(&ptattr);
-
+    static uint8_t pheap[4 * 1024 / sizeof(uint8_t)] = { NULL };
     struct sched_param parameter = { NULL };
+
     memset(&parameter, 0, sizeof(parameter));
     parameter.sched_priority = 10;
-    pthread_attr_setstackaddr(&ptattr, pheap); 
+    void *pmemery = (void*)posix_initialize(pheap);
+    pthread_attr_init(&ptattr);
+    pthread_attr_setstackaddr(&ptattr, pmemery);
     pthread_attr_setschedparam(&ptattr, &parameter);
     pthread_create(&pthread, &ptattr, pthread_entry, NULL);
 }
