@@ -88,6 +88,7 @@ target_link_libraries(audio-player callstack)
 # 包含 debug 头文件
 include_directories(${CMAKE_SOURCE_DIR}/callstack/)
 
+# FreeRTOS 库
 set(FREERTOS_KERNEL_PATH ${CMAKE_SOURCE_DIR}/libs/FreeRTOS-LTS/FreeRTOS/FreeRTOS-Kernel)
 add_library(freertos_config INTERFACE)
 target_include_directories(freertos_config INTERFACE ${FREERTOS_KERNEL_PATH}/examples/template_configuration/)
@@ -118,6 +119,13 @@ target_compile_options(freertos_kernel PRIVATE
     $<$<COMPILE_LANG_AND_ID:C,Clang>:-Wno-cast-align> )
 target_link_libraries(${PROJECT_NAME} freertos_kernel freertos_config)
 set_property(TARGET freertos_kernel PROPERTY C_STANDARD 90)
+
+# threadx 库
+include("${CMAKE_SOURCE_DIR}/libs/threadx/cmake/win32.cmake")
+set(TX_USER_FILE ${CMAKE_SOURCE_DIR}/libs/threadx/tx_user.h)
+add_subdirectory(${CMAKE_SOURCE_DIR}/libs/threadx)
+target_link_libraries(audio-player threadx)
+include_directories(${CMAKE_SOURCE_DIR}/libs/threadx/common/inc)
 
 if (CMAKE_VERSION VERSION_GREATER 3.12)
     set_property(TARGET audio-player PROPERTY CXX_STANDARD 11)
