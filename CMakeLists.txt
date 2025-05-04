@@ -1,19 +1,17 @@
-﻿# CMakeList.txt: audio-player 的 CMake 项目，在此处包括源代码并定义
-# 项目特定的逻辑。
-#
+﻿# CMakeList.txt: SmartPixel 的 CMake 项目
 cmake_minimum_required (VERSION 3.10)
 # 设置C++标准
 set(CMAKE_CXX_STANDARD 11)
-
 # 如果支持，请为 MSVC 编译器启用热重载。
 if (POLICY CMP0141)
     cmake_policy(SET CMP0141 NEW)
     set(CMAKE_MSVC_DEBUG_INFORMATION_FORMAT "$<IF:$<AND:$<C_COMPILER_ID:MSVC>,$<CXX_COMPILER_ID:MSVC>>,$<$<CONFIG:Debug,RelWithDebInfo>:EditAndContinue>,$<$<CONFIG:Debug,RelWithDebInfo>:ProgramDatabase>>")
 endif()
 
-project ("audio-player")
+# 项目名称
+project ("SmartPixel")
 # 源代码
-add_executable (audio-player "audio-player.cpp" "audio-player.h")
+add_executable (${PROJECT_NAME} "audio-player.cpp" "audio-player.h")
 
 # 拷贝资源文件
 file(COPY ${CMAKE_SOURCE_DIR}/player/assets DESTINATION ${CMAKE_BINARY_DIR})
@@ -31,7 +29,7 @@ include_directories(${SDL2_INCLUDE_DIRS})
 include_directories(${SDL2_IMAGE_INCLUDE_DIRS})
 include_directories(${SDL2_TTF_INCLUDE_DIRS})
 # 链接 SDL2 库
-target_link_libraries(audio-player SDL2::SDL2 SDL2_image::SDL2_image SDL2_ttf::SDL2_ttf)
+target_link_libraries(${PROJECT_NAME} SDL2::SDL2 SDL2_image::SDL2_image SDL2_ttf::SDL2_ttf)
 # 避免 SDL2 替换 main 函数
 add_definitions(-DSDL_MAIN_HANDLED)
 
@@ -56,35 +54,35 @@ include_directories(${CMAKE_SOURCE_DIR}/libs/minimp3/)
 # 子目录
 add_subdirectory(audio)
 # 链接 audio 库
-target_link_libraries(audio-player audio)
+target_link_libraries(${PROJECT_NAME} audio)
 # 包含 audio 头文件
 include_directories(${CMAKE_SOURCE_DIR}/audio/)
 
 # 子目录
 add_subdirectory(${CMAKE_SOURCE_DIR}/libs/lvgl)
 # 链接 lvgl 库
-target_link_libraries(audio-player lvgl lvgl::demos lvgl::examples lvgl::thorvg)
+target_link_libraries(${PROJECT_NAME} lvgl lvgl::demos lvgl::examples lvgl::thorvg)
 # 包含 lvgl 头文件
 include_directories(${CMAKE_SOURCE_DIR}/libs/lvgl/)
 
 # 子目录
 add_subdirectory(player)
 # 链接 player 库
-target_link_libraries(audio-player player)
+target_link_libraries(${PROJECT_NAME} player)
 # 包含 player 头文件
 include_directories(${CMAKE_SOURCE_DIR}/player/)
 
 # 子目录
 add_subdirectory(${CMAKE_SOURCE_DIR}/libs/FastLZ)
 # 链接 audio 库
-target_link_libraries(audio-player fastlz)
+target_link_libraries(${PROJECT_NAME} fastlz)
 # 包含 audio 头文件
 include_directories(${CMAKE_SOURCE_DIR}/libs/FastLZ/)
 
 # 子目录
 add_subdirectory(callstack)
 # 链接 debug 库
-target_link_libraries(audio-player callstack)
+target_link_libraries(${PROJECT_NAME} callstack)
 # 包含 debug 头文件
 include_directories(${CMAKE_SOURCE_DIR}/callstack/)
 
@@ -120,13 +118,13 @@ target_compile_options(freertos_kernel PRIVATE
 target_link_libraries(${PROJECT_NAME} freertos_kernel freertos_config)
 set_property(TARGET freertos_kernel PROPERTY C_STANDARD 90)
 
-# threadx 库
+# Threadx 库
 include("${CMAKE_SOURCE_DIR}/libs/threadx/cmake/win32.cmake")
 set(TX_USER_FILE ${CMAKE_SOURCE_DIR}/libs/threadx/tx_user.h)
 add_subdirectory(${CMAKE_SOURCE_DIR}/libs/threadx)
-target_link_libraries(audio-player threadx)
+target_link_libraries(${PROJECT_NAME} threadx)
 include_directories(${CMAKE_SOURCE_DIR}/libs/threadx/common/inc)
 
 if (CMAKE_VERSION VERSION_GREATER 3.12)
-    set_property(TARGET audio-player PROPERTY CXX_STANDARD 11)
+    set_property(TARGET ${PROJECT_NAME} PROPERTY CXX_STANDARD 11)
 endif()
