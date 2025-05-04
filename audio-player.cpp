@@ -6,7 +6,8 @@
 #include <task.h>
 
 #include <stdio.h>
-#include "tx_api.h"
+#include "pthread.h"
+extern "C" unsigned int posix_errno = 0;
 
 void vApplicationStackOverflowHook(TaskHandle_t xTask, char* pcTaskName) {
     (void)xTask;
@@ -14,30 +15,34 @@ void vApplicationStackOverflowHook(TaskHandle_t xTask, char* pcTaskName) {
     for (;;);
 }
 
-#define DEMO_STACK_SIZE         1024
-#define DEMO_BYTE_POOL_SIZE     9120
-static TX_THREAD               thread_0;
-static TX_THREAD               thread_1;
-static TX_BYTE_POOL            byte_pool_0;
-static TX_BYTE_POOL            byte_pool_1;
-static UCHAR                   memory_area[DEMO_BYTE_POOL_SIZE];
-
-static void thread_entry(ULONG thread_input) {
-    while (1) {
-        printf("=================== hello ================\n");
-        tx_thread_sleep(100);
+void* pthread_entry(void* parameter) {
+    int result = 0, counter = 0;
+    struct timespec sleep = { 0,0 };
+    while (true) {
+        sleep.tv_nsec = 999999999;
+        sleep.tv_sec = 0;
+        result = nanosleep(&sleep, 0);
+        printf("%s:%d \n", __FUNCTION__, counter++);
+        if (result)
+            break;
     }
+    return(&result);
 }
 
 void tx_application_define(void* first_unused_memory) {
+    static pthread_t pthread = { NULL };
+    static pthread_attr_t ptattr = { NULL };
+    static uint32_t memory[256 * 1024 / sizeof(uint32_t)] = { NULL };
 
-    static CHAR* pointer = NULL;
-    tx_byte_pool_create(&byte_pool_0, "byte pool", memory_area, DEMO_BYTE_POOL_SIZE);
-    tx_byte_allocate(&byte_pool_0, (VOID**)&pointer, DEMO_STACK_SIZE, TX_NO_WAIT);
-    tx_thread_create(&thread_0, "thread", thread_entry, 0, pointer, DEMO_STACK_SIZE, 1, 1, TX_NO_TIME_SLICE, TX_AUTO_START);
+    void *pheap = (void*)posix_initialize(memory);
+    pthread_attr_init(&ptattr);
 
-    tx_byte_allocate(&byte_pool_1, (VOID**)&pointer, DEMO_STACK_SIZE, TX_NO_WAIT);
-    tx_thread_create(&thread_1, "thread", thread_entry, 0, pointer, DEMO_STACK_SIZE, 1, 1, TX_NO_TIME_SLICE, TX_AUTO_START);
+    struct sched_param parameter = { NULL };
+    memset(&parameter, 0, sizeof(parameter));
+    parameter.sched_priority = 10;
+    pthread_attr_setstackaddr(&ptattr, pheap); 
+    pthread_attr_setschedparam(&ptattr, &parameter);
+    pthread_create(&pthread, &ptattr, pthread_entry, NULL);
 }
 
 int main(void) {

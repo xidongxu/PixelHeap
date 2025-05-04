@@ -48,6 +48,7 @@
 
 
 #ifndef TX_POSIX_SOURCE
+extern unsigned int posix_errno;
 #define errno posix_errno
 #endif
 

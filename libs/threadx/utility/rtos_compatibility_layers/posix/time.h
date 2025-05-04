@@ -46,9 +46,11 @@
 #ifndef _TX_PX_TIME_H
 #define _TX_PX_TIME_H
 
+#ifndef _WIN32
 #ifndef _TIME_T
 #define _TIME_T
 typedef  ULONG  time_t;
+#endif
 #endif
 
 typedef INT clockid_t;
