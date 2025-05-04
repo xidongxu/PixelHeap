@@ -34,10 +34,10 @@ void tx_application_define(void* first_unused_memory) {
     static pthread_attr_t ptattr = { NULL };
     static uint8_t pheap[4 * 1024 / sizeof(uint8_t)] = { NULL };
     struct sched_param parameter = { NULL };
+    void* pmemery = posix_initialize(pheap);
 
     memset(&parameter, 0, sizeof(parameter));
     parameter.sched_priority = 10;
-    void *pmemery = (void*)posix_initialize(pheap);
     pthread_attr_init(&ptattr);
     pthread_attr_setstackaddr(&ptattr, pmemery);
     pthread_attr_setschedparam(&ptattr, &parameter);
