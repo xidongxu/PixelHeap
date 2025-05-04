@@ -7,7 +7,6 @@
 
 #include <stdio.h>
 #include "pthread.h"
-extern "C" unsigned int posix_errno = 0;
 
 void vApplicationStackOverflowHook(TaskHandle_t xTask, char* pcTaskName) {
     (void)xTask;
@@ -15,9 +14,12 @@ void vApplicationStackOverflowHook(TaskHandle_t xTask, char* pcTaskName) {
     for (;;);
 }
 
-void* pthread_entry(void* parameter) {
+static void* pthread_entry(void* parameter) {
     int result = 0, counter = 0;
     struct timespec sleep = { 0,0 };
+    callstack();
+    main_audio();
+    main_player();
     while (true) {
         sleep.tv_nsec = 999999999;
         sleep.tv_sec = 0;
@@ -32,7 +34,7 @@ void* pthread_entry(void* parameter) {
 void tx_application_define(void* first_unused_memory) {
     static pthread_t pthread = { NULL };
     static pthread_attr_t ptattr = { NULL };
-    static uint8_t pheap[4 * 1024 / sizeof(uint8_t)] = { NULL };
+    static uint8_t pheap[256 * 1024] = { NULL };
     struct sched_param parameter = { NULL };
     void* pmemery = posix_initialize(pheap);
 
@@ -46,8 +48,5 @@ void tx_application_define(void* first_unused_memory) {
 
 int main(void) {
     tx_kernel_enter();
-    callstack();
-    main_audio();
-    main_player();
     return 0;
 }

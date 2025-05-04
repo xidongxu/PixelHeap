@@ -25,6 +25,9 @@
 #include "pthread.h"    /* Posix API */
 #include "px_int.h"     /* Posix helper functions */
 
+/* Define a temporary posix errno by xidongxu */
+unsigned int posix_errno = 0;
+
 /**************************************************************************/
 /*                                                                        */
 /*  FUNCTION                                               RELEASE        */
