@@ -9,7 +9,7 @@ if (POLICY CMP0141)
 endif()
 
 # 项目名称
-project ("PixelHeap")
+project ("PixelSprite")
 # 源代码
 add_executable (${PROJECT_NAME} "audio-player.cpp" "audio-player.h")
 
